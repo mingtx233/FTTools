@@ -1,9 +1,8 @@
 import os, time, struct, socket, threading
 
-from Utils import TrialCount
-from FileStream import ReadFileStream, WriteFileStream
-from DataPacketOps import DataPacketOps
-from MessageOps import MessageOps
+from Utils.Utils import TrialCount
+from Utils.FileStream import ReadFileStream, WriteFileStream
+from Utils.MessageOps import MessageOps
 
 # File header format
 # file_size, suggested_chunk_size, rel_file_path

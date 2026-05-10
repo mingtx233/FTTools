@@ -7,7 +7,11 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
+<<<<<<< HEAD
             "args": [ "-f", "./send/aaa.png" ]
+=======
+            "args": [ "-f", "./send" ]
+>>>>>>> 59527c5c7b0ac63e3008540cb930cbe96f9ac197
         }
     ]
 }

@@ -1,6 +1,6 @@
 import numpy as np
 
-from Utils import Random
+from Utils.Utils import Random
 
 def _form_data_map(rand: Random, data_map: np.ndarray) -> np.ndarray:
     tmp_list = list(range(256))

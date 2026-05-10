@@ -1,8 +1,7 @@
-import threading
-import socket
+import threading, socket
 
-from DataPacketOps import DataPacketOps
-from MessageOps import MessageOps
+from Utils.DataPacketOps import DataPacketOps
+from Utils.MessageOps import MessageOps
 
 server_ip     = "127.0.0.1"
 server_port   = 10023
