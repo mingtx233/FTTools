@@ -1,10 +1,8 @@
 import struct, time, itertools
 import hashlib, socket
 
-from Utils import TrialCount, Random
-from DataPacketOps import DataPacketOps
-#from Convertor import Convertor
-#from Compressor import Compressor
+from Utils.Utils import TrialCount, Random
+from Utils.DataPacketOps import DataPacketOps
 
 class Message:
     # Message format:

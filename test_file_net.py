@@ -1,6 +1,6 @@
 import socket
 
-from FileNetOps import recv_file_server, send_file_client
+from Utils.FileNetOps import recv_file_server, send_file_client
 
 server_ip = socket.gethostbyname(socket.gethostname())
 server_port = 10025

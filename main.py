@@ -1,7 +1,8 @@
 import os, socket
 
-from MessageOps import MessageOps
-from FileNetOps import send_file, send_files_in_folder, send_file_ending, recv_file
+from Utils.MessageOps import MessageOps
+from Utils.FileNetOps import send_file, send_files_in_folder, send_file_ending, recv_file
+
 
 class Server:
     _default_server_ip = socket.gethostbyname(socket.gethostname())
