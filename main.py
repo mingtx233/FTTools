@@ -1,7 +1,5 @@
 import os, socket
 
-from Convertor import Convertor
-from DataPacketOps import DataPacketOps
 from MessageOps import MessageOps
 from FileNetOps import send_file, send_files_in_folder, send_file_ending, recv_file
 
@@ -27,9 +25,9 @@ class Server:
 
         while True:
             server_sock, _ = server.accept()
-            data_conn = DataPacketOps(server_sock)
-            msg_conn  = MessageOps(data_conn)
+            msg_conn  = MessageOps(server_sock)
             recv_file(msg_conn, self.root_path, self.chunk_size)
+            msg_conn.close()
 
 
 class Client:
@@ -43,21 +41,22 @@ class Client:
         self.passwd = passwd
         self.suggested_chunk_size = suggested_chunk_size if suggested_chunk_size > 0 else self._default_chunk_size
 
-    def send(self, file_path: str) -> bool:
+    def send(self, file_path: str, need_remove_file: bool = False) -> bool:
         client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_sock.connect((self.server_ip, self.server_port))
-        data_conn = DataPacketOps(client_sock)
-        msg_conn = MessageOps(data_conn)
+        msg_conn = MessageOps(client_sock)
         print("Info: Connected to server at %s:%d" % (self.server_ip, self.server_port))
 
         res = False
         if os.path.isfile(file_path):
-            res = send_file(msg_conn, file_path, os.path.basename(file_path), self.suggested_chunk_size)
+            res = send_file(msg_conn, file_path, os.path.basename(file_path),
+                            self.suggested_chunk_size, need_remove_file)
         elif os.path.isdir(file_path):
-            res = send_files_in_folder(msg_conn, file_path, "./", self.suggested_chunk_size)
-
+            res = send_files_in_folder(msg_conn, file_path, "./",
+                                       self.suggested_chunk_size, need_remove_file)
+        
         send_file_ending(msg_conn)
-        client_sock.close()
+        msg_conn.close()
         return res
 
 
@@ -65,10 +64,12 @@ if __name__ == "__main__":
     import argparse, json
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-s", "--server", action='store_true', help = "Run in server mode or client mode")
+    parser.add_argument("-s", "--server", action="store_true", help = "Run in server mode or client mode")
     parser.add_argument("-c", "--config", type = str, default = "config.json",
                         help = "Configuration file name, \"config.json\" by default.")
     parser.add_argument("-f", "--file", type = str, default = "", help = "Name of file or folder to send (required in client mode).")
+    parser.add_argument("-r", "--remove_file", action="store_true", help = "Remove file after sending.")
+
     args = parser.parse_args()
 
     if not os.path.isfile(args.config):
@@ -85,7 +86,7 @@ if __name__ == "__main__":
             exit()
 
     with open(args.config, 'r') as config_file:
-        config_params: dict = json.load(config_file)
+        config_params: dict[str, str | int] = json.load(config_file)
     
     server_ip   = config_params.get("server_ip", "")
     server_port = config_params.get("server_port", 0)
@@ -103,4 +104,4 @@ if __name__ == "__main__":
             exit()
 
         client = Client(server_ip, server_port, passwd, chunk_size)
-        client.send(args.file)
+        client.send(args.file, args.remove_file)
