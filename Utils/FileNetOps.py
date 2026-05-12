@@ -89,10 +89,11 @@ def send_file(msg_conn: MessageOps, file_path: str, rel_file_path: str,
     while status_code != 200 and trial_count.keep_on_trying():
         file_data = read_file.read(file_pos, chunk_size)
         try:
+            print("sending file data, file pos %d" % file_pos)
             if msg_conn.send(file_data):
                 data_reply = msg_conn.recv()
             else:
-                print("Send Warning: Failed to receive header response.")
+                print("Send Warning: Failed to receive file data.")
                 trial_count.try_once()
                 continue
         except Exception as e:

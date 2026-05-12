@@ -17,7 +17,7 @@ import socket, struct, hashlib
 # Do not ensure the packet has been sent and received successfully
 # Do not handle "ConnectionAbortedError" Error
 class DataPacketOps:
-    _time_out = 0.25 # Increase for bad network condition
+    _time_out = 1.0 # Increase for bad network condition
     
     _tcp_buf_size = 1024 * 4 # Must be larger than 4+16
     
