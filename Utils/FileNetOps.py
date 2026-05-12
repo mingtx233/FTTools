@@ -1,4 +1,4 @@
-import os, time, struct, socket, threading
+import os, time, struct
 
 from Utils.Utils import TrialCount
 from Utils.FileStream import ReadFileStream, WriteFileStream
@@ -215,16 +215,17 @@ def recv_file(msg_conn: MessageOps, root_folder_path: str, chunk_size: int = 0) 
             data_reply = _form_data_reply(100, chunk_size, write_file.cur_file_size)
             
             file_data = None
-            try:
-                if msg_conn.send(data_reply):
-                    file_data = msg_conn.recv()
-                else:
-                    print("Recv Warning: Failed to send data reply.\n", end = "")
-                    trial_count.try_once()
-                    continue
-            except Exception as e:
-                print("Recv Error: Connection Closed (%s).\n" % e, end = "")
-                return False
+            #try:
+            print("File size %d\n" % write_file.cur_file_size, end = "")
+            if msg_conn.send(data_reply):
+                file_data = msg_conn.recv()
+            else:
+                print("Recv Warning: Failed to send data reply.\n", end = "")
+                trial_count.try_once()
+                continue
+            #except Exception as e:
+                #print("Recv Error: Connection Closed (%s).\n" % e, end = "")
+                #return False
 
             if file_data is None:
                 trial_count.try_once()
@@ -241,77 +242,18 @@ def recv_file(msg_conn: MessageOps, root_folder_path: str, chunk_size: int = 0) 
                 print("Recv Info: %.2f%% received at %.1fkB/s.\n" % (file_perc, send_speed), end = "")
                 prev_time = cur_time
                 prev_file_size = cur_file_size
-        
-        # Completed
-        data_reply = _form_data_reply(200, chunk_size, write_file.cur_file_size)
-        try:
-            msg_conn.send(data_reply)
-        except Exception as e:
-            pass
-        
+                
         if trial_count.failed():
             print("Recv Info: Failed to receive file \"%s\".\n" % rel_file_path, end = "")
-        else:
+        else: # Completed
+            data_reply = _form_data_reply(200, chunk_size, write_file.cur_file_size)
+            try:
+                msg_conn.send(data_reply)
+            except Exception as e:
+                pass
             print("Recv Info: Received file \"%s\" (%.1f kB).\n" % \
                   (rel_file_path, float(write_file.cur_file_size)/1024.0), end = "")
+        
+        write_file.close()
 
     return True
-
-
-def send_file_client(server_ip: str, server_port: int,
-                     passwd: bytes, file_path: str,
-                     suggested_chunk_size: int = 1024*64) -> bool:
-    client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client_sock.connect((server_ip, server_port))
-    print("Info: Connected to server at %s:%d\n" % (server_ip, server_port), end = "")
-    msg_conn  = MessageOps(client_sock)
-
-    res = False
-    if os.path.isfile(file_path):
-        res = send_file(msg_conn, file_path, os.path.basename(file_path), suggested_chunk_size)
-    elif os.path.isdir(file_path):
-        res = send_files_in_folder(msg_conn, file_path, "./", suggested_chunk_size)
-
-    send_file_ending(msg_conn)
-    msg_conn.close()
-    return res
-
-
-class _RecvFileThread(threading.Thread):
-    def __init__(self, server: socket.socket, passwd: bytes,
-                 root_path: str, chunk_size: int | None = None):
-        super().__init__()
-        self.server     = server
-        self.passwd     = passwd
-        self.root_path  = root_path
-        self.chunk_size = chunk_size
-        self.running    = True
-    
-    def run(self):
-        while self.running:
-            self.server.setblocking(False)
-            try:
-                server_sock, _ = self.server.accept()
-            except:
-                continue
-            self.server.setblocking(True)
-
-            msg_conn  = MessageOps(server_sock)
-            recv_file(msg_conn, self.root_path, self.chunk_size)
-            server_sock.close()
-
-    def stop_after_last_file(self):
-        self.running = False
-
-
-def recv_file_server(server_ip: str, server_port: int,
-                     passwd: bytes, root_path: str,
-                     chunk_size: int = 0) -> _RecvFileThread:
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((server_ip, server_port))
-    server.listen(5) # Listen for incoming connections
-    print("Info: Server is listening on %s:%d\n" % (server_ip, server_port), end = "")
-
-    thread = _RecvFileThread(server, passwd, root_path, chunk_size)
-    thread.start()
-    return thread

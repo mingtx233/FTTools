@@ -50,10 +50,10 @@ class DataPacketOps:
         self.cur_data_id = 0
         self.cur_byte_off = 0
 
-        self.data_size_buf = bytearray(DataPacketOps._header_len // 2)
+        self.data_size_buf       = bytearray(DataPacketOps._header_len // 2)
         self.header_checksum_buf = bytearray(DataPacketOps._header_len // 2)
-        self.data_buf = bytearray(self.max_packet_size)
-        self.md5_checksum_buf = bytearray(DataPacketOps._md5_checksum_len)
+        self.data_buf            = bytearray(self.max_packet_size)
+        self.md5_checksum_buf    = bytearray(DataPacketOps._md5_checksum_len)
 
     def set_timeout(self, time_out: float = _time_out) -> None:
         self.conn.settimeout(time_out)
@@ -62,9 +62,9 @@ class DataPacketOps:
         self.conn.close()
 
     def send(self, data: bytes) -> None:
-        data_len = len(data)
+        data_len     = len(data)
         assert data_len <= self.max_data_size, "Oversize data to sent (size limit %d)" % self.max_data_size
-        data_packet = struct.pack("HH", data_len, (~data_len+1) & 0xFFFF) + data
+        data_packet  = struct.pack("HH", data_len, (~data_len+1) & 0xFFFF) + data
         md5_checksum = hashlib.md5(data_packet).digest()
         self.conn.sendall(data_packet + md5_checksum)
 
