@@ -78,7 +78,7 @@ def send_file(msg_conn: MessageOps, file_path: str, rel_file_path: str,
         trial_count.try_once()
     
     if trial_count.failed():
-        print("Send Error: Too many trials, file not sent successfully.")
+        print("Send Error: Fail to send file.")
         return False
 
     # Send file

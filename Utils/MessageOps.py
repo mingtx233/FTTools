@@ -87,13 +87,7 @@ class Message:
         self.checksum = sha256.digest()
         return self.header_info_data + self.checksum + self.data
 
-    #def is_old_msg(self, prev_msg_id: int, prev_msg_rand_id)
-
-    def is_new_msg(self, prev_msg_id: int, prev_msg_rand_id) -> bool:
-        return self.msg_id == (prev_msg_id + 1) & 0xFFFF or \
-            (self.msg_id == prev_msg_id and self.rand_id != prev_msg_rand_id)
-    
-    def is_cur_msg(self, cur_msg_id, cur_msg_rand_id: int) -> bool:
+    def is_cur_msg(self, cur_msg_id: int, cur_msg_rand_id: int) -> bool:
         return self.msg_id == cur_msg_id and self.rand_id == cur_msg_rand_id
 
     def is_error(self) -> bool:
@@ -161,26 +155,46 @@ class Message:
         packet_id, packet_data_len = struct.unpack("QI", self.data[:Message.min_data_msg_len])
         return packet_id, packet_data_len, self.data[Message.min_data_msg_len:]
 
-    def form_ask_completion_msg(self) -> bytes:
-        self.flag = Message.COMPLETION
-        self.data = b"\x00"
-        return bytes(self)
-    
-    def form_confirm_completion_msg(self) -> bytes:
+    def form_sender_ask_for_completion_msg(self) -> bytes:
         self.flag = Message.COMPLETION
         self.data = b"\x01"
         return bytes(self)
     
-    # Only for COMPLETION message
-    def is_ask_for_completion_msg(self) -> bool:
-        if len(self.data) < 1:
-            return False
-        return struct.unpack("B", self.data[:1])[0] == 0
+    def form_sender_confirm_completion_msg(self) -> bytes:
+        self.flag = Message.COMPLETION
+        self.data = b"\x02"
+        return bytes(self)
 
-    def is_confirm_completion_msg(self) -> bool:
+    def form_receiver_ask_for_completion_msg(self) -> bytes:
+        self.flag = Message.COMPLETION
+        self.data = b"\x03"
+        return bytes(self)
+    
+    def form_receiver_confirm_completion_msg(self) -> bytes:
+        self.flag = Message.COMPLETION
+        self.data = b"\x04"
+        return bytes(self)
+    
+    # Only for COMPLETION message
+    def is_sender_asking_for_completion_msg(self) -> bool:
         if len(self.data) < 1:
             return False
-        return struct.unpack("B", self.data[:1])[0] == 1
+        return self.data[:1] == b"\x01"
+
+    def is_sender_confirming_completion_msg(self) -> bool:
+        if len(self.data) < 1:
+            return False
+        return self.data[:1] == b"\x02"
+
+    def is_receiver_asking_for_completion_msg(self) -> bool:
+        if len(self.data) < 1:
+            return False
+        return self.data[:1] == b"\x03"
+
+    def is_receiver_confirming_completion_msg(self) -> bool:
+        if len(self.data) < 1:
+            return False
+        return self.data[:1] == b"\x04"
 
     def __repr__(self):
         if self.flag == Message.ERROR:
@@ -197,10 +211,14 @@ class Message:
             packet_id, packet_data_size, _ = self.parse_as_data_msg()
             return "Data (%d %d): Packet id %d, Packet data size %d" % (self.msg_id, self.rand_id, packet_id, packet_data_size)
         elif self.flag == Message.COMPLETION:
-            if self.is_ask_for_completion_msg():
-                state = "Ask"
-            elif self.is_confirm_completion_msg():
-                state = "Confirm"
+            if self.is_sender_asking_for_completion_msg():
+                state = "Sender Ask"
+            elif self.is_sender_confirming_completion_msg():
+                state = "Sender Confirm"
+            elif self.is_receiver_asking_for_completion_msg():
+                state = "Receiver Ask"
+            elif self.is_receiver_confirming_completion_msg():
+                state = "Receiver Confirm"
             else:
                 state = "Unknown"
             return "Completion (%d %d): %s" % (self.msg_id, self.rand_id, state)
@@ -215,7 +233,7 @@ class MessageOps:
         return self.rand.extract_number() & 0xffff
 
     def __init__(self, data_packet_conn: DataPacketOps | socket.socket, *,
-                 max_apply_packet_num:   int | None = None,
+                 max_apply_packet_num: int | None = None,
                  trial_count: int | None = None):
         if type(data_packet_conn) is DataPacketOps:
             self.data_packet_conn = data_packet_conn
@@ -239,35 +257,31 @@ class MessageOps:
     
     # One layer above the 
     def recv(self) -> bytes | None:
-        cur_msg_id = self.recv_msg_id
-        cur_msg_rand_id = self.recv_msg_rand_id
         # Receive header
         self.trial_count.reset()
         packet_num           = 0
         total_data_len       = 0
         max_apply_packet_num = 0
         header_msg           = Message()
+        #
         while self.trial_count.keep_on_trying():
             header_msg_bytes = self.data_packet_conn.recv()
-            if header_msg_bytes is None:
-                self.trial_count.try_once()
-                continue
             
-            if header_msg.parse(header_msg_bytes):
-                #if header_msg.is_cur_msg(cur_msg_id, cur_msg_rand_id):
-                # send confirm error message
-
-                if header_msg.is_new_msg(cur_msg_id) and \
-                    header_msg.data_is_correct():
+            if header_msg_bytes is not None and \
+                header_msg.parse(header_msg_bytes) and \
+                not header_msg.is_cur_msg(self.recv_msg_id, self.recv_msg_rand_id) and \
+                header_msg.data_is_correct():
+                if header_msg.is_header():
                     # print("recv (header): %s\n" % header_msg, end = "")
-                    if header_msg.is_error():
-                        return None # Connection abort
-                    elif header_msg.is_header():
-                        self.cur_msg_id      = header_msg.msg_id
-                        self.cur_msg_rand_id = header_msg.rand_id
-                        max_apply_packet_num, packet_num, total_data_len = header_msg.parse_as_header_msg()
-                        if packet_num > 0:
-                            break # Success
+                    cur_msg_id      = header_msg.msg_id
+                    cur_msg_rand_id = header_msg.rand_id
+                    max_apply_packet_num, packet_num, total_data_len = header_msg.parse_as_header_msg()
+                    if packet_num > 0:
+                        break # Success
+                elif header_msg.is_sender_asking_for_completion_msg():
+                    prev_completion_msg      = Message(header_msg.msg_id, header_msg.rand_id)
+                    confirm_completion_bytes = prev_completion_msg.form_receiver_confirm_completion_msg()
+                    self.data_packet_conn.send(confirm_completion_bytes)
             
             self.trial_count.try_once()
         
@@ -277,8 +291,8 @@ class MessageOps:
         # Start receving data
         to_receive_packet_id_set: set[int] = set(range(packet_num))
         data_packets: list[bytes] = []
-        app_data_msg = Message(self.cur_msg_id, self.cur_msg_rand_id)
-        data_msg     = Message(self.cur_msg_id, self.cur_msg_rand_id)
+        app_data_msg = Message(cur_msg_id, cur_msg_rand_id)
+        data_msg     = Message(cur_msg_id, cur_msg_rand_id)
         self.trial_count.reset()
         while len(to_receive_packet_id_set) > 0 and self.trial_count.keep_on_trying():
             apply_data_ids = list(itertools.islice(to_receive_packet_id_set, max_apply_packet_num))
@@ -294,7 +308,7 @@ class MessageOps:
                     break
                 
                 if not data_msg.parse(data_msg_bytes) or \
-                    not data_msg.is_cur_msg(self.cur_msg_id, self.cur_msg_rand_id) or \
+                    not data_msg.is_cur_msg(cur_msg_id, cur_msg_rand_id) or \
                     not data_msg.data_is_correct():
                     continue
                 # print("recv (data): %s\n" % data_msg, end = "")
@@ -330,9 +344,9 @@ class MessageOps:
             return None
 
         # Completed
-        completion_msg = Message(self.cur_msg_id, self.cur_msg_rand_id)
-        ask_completion_bytes = completion_msg.form_ask_completion_msg()
-        confirm_completion_bytes = completion_msg.form_confirm_completion_msg()
+        completion_msg = Message(cur_msg_id, cur_msg_rand_id)
+        ask_completion_bytes = completion_msg.form_receiver_ask_for_completion_msg()
+        confirm_completion_bytes = completion_msg.form_receiver_confirm_completion_msg()
         has_confirmed_completion = False
         has_been_asked_for_completion = False
         self.trial_count.reset()
@@ -342,24 +356,24 @@ class MessageOps:
 
             completion_bytes1 = self.data_packet_conn.recv()
             if completion_bytes1 is not None and completion_msg.parse(completion_bytes1) and \
-                completion_msg.is_cur_msg(self.cur_msg_id, self.cur_msg_rand_id) and \
+                completion_msg.is_cur_msg(cur_msg_id, cur_msg_rand_id) and \
                 completion_msg.data_is_correct() and \
                 completion_msg.is_completion():
                 # print("recv (completion): %s\n" % completion_msg, end = "")
-                if completion_msg.is_confirm_completion_msg():
+                if completion_msg.is_sender_confirming_completion_msg():
                     has_confirmed_completion = True
-                elif completion_msg.is_ask_for_completion_msg():
+                elif completion_msg.is_sender_asking_for_completion_msg():
                     has_been_asked_for_completion = True
             
             completion_bytes2 = self.data_packet_conn.recv()
             if completion_bytes2 is not None and completion_msg.parse(completion_bytes2) and \
-                completion_msg.is_cur_msg(self.cur_msg_id, self.cur_msg_rand_id) and \
+                completion_msg.is_cur_msg(cur_msg_id, cur_msg_rand_id) and \
                 completion_msg.data_is_correct() and \
                 completion_msg.is_completion():
                 # print("recv (completion): %s\n" % completion_msg, end = "")
-                if completion_msg.is_confirm_completion_msg():
+                if completion_msg.is_sender_confirming_completion_msg():
                     has_confirmed_completion = True
-                elif completion_msg.is_ask_for_completion_msg():
+                elif completion_msg.is_sender_asking_for_completion_msg():
                     has_been_asked_for_completion = True
 
             if has_been_asked_for_completion:
@@ -371,7 +385,7 @@ class MessageOps:
             self.trial_count.try_once()
         
         if has_confirmed_completion or has_been_asked_for_completion: # The send side already knows completion
-            self.recv_msg_id += 1
+            self.recv_msg_id = cur_msg_id
             self.recv_msg_rand_id = cur_msg_rand_id
         
         # Combine data
@@ -379,15 +393,14 @@ class MessageOps:
         final_data = b''.join([ data_packet[1] for data_packet in data_packets ])
         if len(final_data) != total_data_len:
             final_data = None
-        # Decyrt
-        # Uncompressed
-
+        # Decyrt and Uncompressed
+        
         return final_data
 
     def send(self, data: bytes) -> bool:
-        self.cur_msg_id += 1
-        self.cur_msg_rand_id = self._gen_rand_msg_id()
-        error_msg = Message(self.cur_msg_id, self.cur_msg_rand_id)
+        cur_msg_id = self.send_msg_id + 1
+        cur_msg_rand_id = self._gen_rand_msg_id()
+        error_msg = Message(cur_msg_id, cur_msg_rand_id)
         error_msg_bytes = error_msg.form_error_msg()
 
         # Send header
@@ -395,20 +408,18 @@ class MessageOps:
         packet_data_size   = Message.cal_msg_data_size(self.data_packet_conn.max_data_size)
         data_len           = len(data)
         packet_num         = (data_len + packet_data_size - 1) // packet_data_size
-        header_msg         = Message(self.cur_msg_id, self.cur_msg_rand_id)
+        header_msg         = Message(cur_msg_id, cur_msg_rand_id)
         header_msg_bytes   = header_msg.form_header_msg(self.send_max_apply_packet_num, packet_num, data_len)
-        apply_data_msg     = Message(self.cur_msg_id, self.cur_msg_rand_id)
+        apply_data_msg     = Message(cur_msg_id, cur_msg_rand_id)
         applied_packet_ids = None
         while self.trial_count.keep_on_trying():
             self.data_packet_conn.send(header_msg_bytes)
             
             apply_data_msg_bytes = self.data_packet_conn.recv()
-            if apply_data_msg_bytes is None:
-                self.trial_count.try_once()
-                continue
             
-            if apply_data_msg.parse(apply_data_msg_bytes) and \
-                apply_data_msg.is_cur_msg(self.cur_msg_id, self.cur_msg_rand_id) and \
+            if apply_data_msg_bytes is not None and \
+                apply_data_msg.parse(apply_data_msg_bytes) and \
+                apply_data_msg.is_cur_msg(cur_msg_id, cur_msg_rand_id) and \
                 apply_data_msg.data_is_correct():
                 # print("send (app data): %s\n" % apply_data_msg, end = "")
 
@@ -426,8 +437,8 @@ class MessageOps:
             return False
 
         self.trial_count.reset()
-        data_msg     = Message(self.cur_msg_id, self.cur_msg_rand_id)
-        app_data_msg = Message(self.cur_msg_id, self.cur_msg_rand_id)
+        data_msg     = Message(cur_msg_id, cur_msg_rand_id)
+        app_data_msg = Message(cur_msg_id, cur_msg_rand_id)
         while self.trial_count.keep_on_trying():
             if applied_packet_ids is None:
                 self.trial_count.try_once()
@@ -460,12 +471,12 @@ class MessageOps:
                 continue
             
             if app_data_msg.parse(app_data_msg_bytes) and \
-                app_data_msg.is_cur_msg(self.cur_msg_id, self.cur_msg_rand_id) and \
+                app_data_msg.is_cur_msg(cur_msg_id, cur_msg_rand_id) and \
                 app_data_msg.data_is_correct():
                 # print("send (app data): %s\n" % app_data_msg, end = "")
                 if app_data_msg.is_error():
                     return False
-                elif app_data_msg.is_completion():
+                elif app_data_msg.is_receiver_asking_for_completion_msg():
                     break
                 elif app_data_msg.is_apply_data():
                     applied_packet_ids = app_data_msg.parse_as_apply_data_msg()
@@ -474,21 +485,25 @@ class MessageOps:
             self.data_packet_conn.send(error_msg_bytes)
             return False
         
+        self.send_msg_id      = cur_msg_id
+        self.send_msg_rand_id = cur_msg_rand_id
+
         # Completed
         self.trial_count.reset()
-        completion_msg = Message(self.cur_msg_id, self.cur_msg_rand_id)
+        completion_msg               = Message(cur_msg_id, cur_msg_rand_id)
+        confirm_completion_msg_bytes = completion_msg.form_sender_confirm_completion_msg()
+        ask_completion_msg_bytes     = completion_msg.form_sender_ask_for_completion_msg()
         while self.trial_count.keep_on_trying():
-            confirm_completion_msg_bytes = completion_msg.form_confirm_completion_msg()
             self.data_packet_conn.send(confirm_completion_msg_bytes)
-            ask_completion_msg_bytes = completion_msg.form_ask_completion_msg()
             self.data_packet_conn.send(ask_completion_msg_bytes)
             
             confirm_completion_msg_bytes = self.data_packet_conn.recv()
-            if completion_msg.parse(confirm_completion_msg_bytes) and \
-                completion_msg.is_cur_msg(self.cur_msg_id, self.cur_msg_rand_id) and \
+            if confirm_completion_msg_bytes is not None and \
+                completion_msg.parse(confirm_completion_msg_bytes) and \
+                completion_msg.is_cur_msg(cur_msg_id, cur_msg_rand_id) and \
                 completion_msg.data_is_correct() and \
-                completion_msg.is_completion():
+                completion_msg.is_receiver_confirming_completion_msg():
                 # print("send (completion): %s\n" % completion_msg, end = "")
                 break
-            
+        
         return True
